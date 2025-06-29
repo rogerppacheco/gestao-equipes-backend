@@ -1,4 +1,4 @@
-// Config/db.js
+// config/db.js
 require('dotenv').config();
 const mysql = require('mysql2/promise');
 
