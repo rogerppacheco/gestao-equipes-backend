@@ -1,5 +1,5 @@
 // controllers/motivoController.js
-const pool = require('../Config/db');
+const pool = require('../config/db');
 
 exports.getMotivos = async (req, res) => {
     try {

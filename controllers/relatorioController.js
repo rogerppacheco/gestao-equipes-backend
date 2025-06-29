@@ -1,5 +1,5 @@
 // controllers/relatorioController.js
-const pool = require('../Config/db');
+const pool = require('../config/db');
 
 // Função para calcular os dias úteis REAIS em um intervalo
 const calcularDiasUteis = async (dataInicio, dataFim) => {

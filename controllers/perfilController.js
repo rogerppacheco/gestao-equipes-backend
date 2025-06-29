@@ -1,5 +1,5 @@
 // controllers/perfilController.js
-const pool = require('../Config/db');
+const pool = require('../config/db');
 
 // @desc    Buscar todos os perfis
 exports.getPerfis = async (req, res) => {

@@ -1,5 +1,5 @@
 // controllers/presencaController.js
-const pool = require('../Config/db');
+const pool = require('../config/db');
 
 // @route   GET api/presenca/minha-equipe
 // @desc    Buscar todos os vendedores da equipe do supervisor logado

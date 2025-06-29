@@ -1,5 +1,5 @@
 // controllers/diasNaoUteisController.js
-const pool = require('../Config/db');
+const pool = require('../config/db');
 
 exports.getDiasNaoUteis = async (req, res) => {
     try {
