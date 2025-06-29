@@ -1,56 +1,103 @@
-// controllers/presencaController.js
 const pool = require('../config/db');
 
-// @route   GET api/presenca/minha-equipe
-// @desc    Buscar todos os vendedores da equipe do supervisor logado
-exports.getMinhaEquipe = async (req, res) => {
+// @desc    Registrar ou atualizar a presença de um usuário (vendedor)
+// @route   POST /api/presenca
+// @access  Private (Supervisor, Diretoria)
+exports.registrarPresenca = async (req, res) => {
+    const { usuarioId, data, status, motivoId, observacao } = req.body;
+
+    // Validação inicial mais explícita no backend
+    // 'status' deve ser um booleano, não string.
+    if (!usuarioId || !data || typeof status !== 'boolean') {
+        console.error('Validação de dados falhou: ', { usuarioId, data, status });
+        return res.status(400).json({ msg: 'Dados de presença (usuarioId, data, status) incompletos ou inválidos.' });
+    }
+
+    // Se o status for ausente (false), motivoId deve ser fornecido e não nulo/vazio
+    if (status === false && !motivoId) {
+        return res.status(400).json({ msg: 'Motivo da ausência é obrigatório.' });
+    }
+
     try {
-        // req.user.id vem do token JWT, que o nosso middleware de autenticação decodificou
-        const supervisorId = req.user.id; 
-        
-        const [vendedores] = await pool.query(
-            'SELECT id, nome_completo FROM usuarios WHERE supervisor_id = ? AND status = TRUE', 
-            [supervisorId]
+        // Verifica se o usuário que está registrando tem permissão (Supervisor ou Diretoria)
+        const userPerfil = req.user.perfil;
+        if (userPerfil !== 'Supervisor' && userPerfil !== 'Diretoria') {
+            return res.status(403).json({ msg: 'Acesso negado. Você não tem permissão para registrar presenças.' });
+        }
+
+        // Antes de inserir/atualizar, verifique se já existe um registro para o usuário e data
+        const [existingPresenca] = await pool.query(
+            'SELECT id FROM presencas WHERE usuario_id = ? AND data = ?',
+            [usuarioId, data]
         );
 
-        res.json(vendedores);
+        let sql;
+        let params;
+
+        if (existingPresenca.length > 0) {
+            // Se já existe, atualiza
+            sql = `
+                UPDATE presencas
+                SET status = ?, motivo_id = ?, observacao = ?, ultima_atualizacao = NOW()
+                WHERE id = ?
+            `;
+            // Se o status for presente (true), motivo_id e observacao devem ser NULL
+            params = [
+                status,
+                status ? null : motivoId, // Se presente, motivo_id é NULL
+                status ? null : (observacao || null), // Se presente, observacao é NULL; se ausente mas vazio, também NULL
+                existingPresenca[0].id
+            ];
+        } else {
+            // Se não existe, insere
+            sql = `
+                INSERT INTO presencas (usuario_id, data, status, motivo_id, observacao)
+                VALUES (?, ?, ?, ?, ?)
+            `;
+            params = [
+                usuarioId,
+                data,
+                status,
+                status ? null : motivoId, // Se presente, motivo_id é NULL
+                status ? null : (observacao || null) // Se presente, observacao é NULL; se ausente mas vazio, também NULL
+            ];
+        }
+
+        await pool.query(sql, params);
+        res.json({ msg: 'Presença registrada/atualizada com sucesso!' });
 
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Erro no servidor.');
+        console.error('ERRO INTERNO NO SERVIDOR ao registrar presença:', err.message);
+        res.status(500).send('Erro no servidor');
     }
 };
 
-// @route   POST api/presenca
-// @desc    Lançar presença ou ausência para um vendedor
-// Em controllers/presencaController.js
-// Substitua a função lancarPresenca por esta:
-exports.lancarPresenca = async (req, res) => {
-    const { vendedorId, data, status, motivoId, observacao } = req.body;
-    const lancadoPorId = req.user.id;
-
-    if (!vendedorId || !data || !status) {
-        return res.status(400).json({ msg: 'Dados incompletos.' });
-    }
-
+// @desc    Obter a lista de vendedores da equipe do usuário logado
+// @route   GET /api/presenca/minha-equipe
+// @access  Private (Supervisor, Diretoria)
+exports.listarMinhaEquipe = async (req, res) => {
     try {
+        const userPerfil = req.user.perfil;
+        if (userPerfil !== 'Supervisor' && userPerfil !== 'Diretoria') {
+            return res.status(403).json({ msg: 'Acesso negado. Você não tem permissão para ver a equipe.' });
+        }
+
+        // Consulta para obter usuários com perfil 'Vendedor'
+        // 'u.nome AS nome_completo' é usado para que o campo corresponda a 'vendedor.nome_completo' no frontend.
         const sql = `
-            INSERT INTO registros_presenca (vendedor_id, data, status, motivo_id, observacao, lancado_por_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-            status = VALUES(status), 
-            motivo_id = VALUES(motivo_id), 
-            observacao = VALUES(observacao), 
-            lancado_por_id = VALUES(lancado_por_id);
+            SELECT u.id, u.nome AS nome_completo, u.email
+            FROM usuarios u
+            JOIN perfis p ON u.perfil_id = p.id
+            WHERE p.nome = 'Vendedor' AND u.status = TRUE
+            ORDER BY u.nome ASC
         `;
-        
-        // Passa o motivoId para a query (será null se não for ausência)
-        await pool.query(sql, [vendedorId, data, status, motivoId || null, observacao, lancadoPorId]);
+        const [equipe] = await pool.query(sql);
 
-        res.json({ msg: 'Presença registrada com sucesso.' });
-
+        res.json(equipe);
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Erro no servidor.');
+        console.error('ERRO INTERNO NO SERVIDOR ao listar minha equipe:', err.message);
+        res.status(500).send('Erro no servidor');
     }
 };
+
+// Se houver outras funções neste arquivo, mantenha-as aqui.

@@ -45,4 +45,6 @@ router.delete('/usuarios/:id', inativarUsuario);
 // Rota auxiliar para listar supervisores no formulário
 router.get('/supervisores', getSupervisores);
 
+router.get('/vendedores', auth, listarVendedores);
+
 module.exports = router;

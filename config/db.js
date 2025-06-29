@@ -1,4 +1,5 @@
 // Config/db.js
+console.log('db.js carregado');
 require('dotenv').config();
 const mysql = require('mysql2/promise');
 

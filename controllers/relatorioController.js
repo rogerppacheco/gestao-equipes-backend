@@ -8,11 +8,13 @@ const calcularDiasUteis = async (dataInicio, dataFim) => {
             'SELECT data FROM dias_nao_uteis WHERE data BETWEEN ? AND ?',
             [dataInicio, dataFim]
         );
-        const diasNaoUteisSet = new Set(diasNaoUteisRows.map(d => new Date(d.data).toISOString().split('T')[0]));
+        const diasNaoUteisSet = new Set(diasNaoUteisRows.map(d => {
+            return new Date(d.data).toISOString().split('T')[0];
+        }));
 
         let count = 0;
-        let dataAtual = new Date(dataInicio + 'T03:00:00Z');
-        const fim = new Date(dataFim + 'T03:00:00Z');
+        let dataAtual = new Date(dataInicio + 'T00:00:00'); 
+        const fim = new Date(dataFim + 'T00:00:00');
 
         while (dataAtual <= fim) {
             const diaDaSemana = dataAtual.getDay();
@@ -26,18 +28,20 @@ const calcularDiasUteis = async (dataInicio, dataFim) => {
         return count;
     } catch (error) {
         console.error("Erro ao calcular dias úteis:", error);
-        return 0; // Retorna 0 em caso de erro para não quebrar o relatório
+        return 0; 
     }
 };
 
 // Relatório Final Consolidado
 exports.getRelatorioSemanal = async (req, res) => {
     const { dataInicio, dataFim } = req.query;
+    const userPerfil = req.user.perfil_nome;
+
     if (!dataInicio || !dataFim) {
         return res.status(400).json({ msg: 'As datas de início e fim são obrigatórias.' });
     }
     try {
-        const sql = `
+        let sql = `
             SELECT 
                 u.id, u.nome_completo,
                 COALESCE(af.valor_almoco, 0) as valor_almoco,
@@ -45,14 +49,31 @@ exports.getRelatorioSemanal = async (req, res) => {
                 rp.data, rp.status,
                 ma.gera_desconto
             FROM usuarios u
-            LEFT JOIN auxilios_financeiros af ON u.id = af.vendedor_id
+            LEFT JOIN auxilios_financeiros af ON u.id = af.vendedor_id -- CORRIGIDO
             LEFT JOIN registros_presenca rp ON u.id = rp.vendedor_id AND rp.data BETWEEN ? AND ?
             LEFT JOIN motivos_ausencia ma ON rp.motivo_id = ma.id
-            WHERE u.perfil_id IN (SELECT id FROM perfis WHERE nome = 'Vendedor') AND u.status = TRUE;
         `;
-        const [rows] = await pool.query(sql, [dataInicio, dataFim]);
+        const params = [dataInicio, dataFim];
+        const conditions = [];
+
+        // Filtro de perfil dinâmico: Se não for Diretoria, inclui apenas os perfis específicos
+        if (userPerfil !== 'Diretoria') {
+            conditions.push(`u.perfil_id IN (SELECT id FROM perfis WHERE nome IN ('Vendedor', 'Supervisor', 'Gerente', 'BackOffice'))`);
+        }
+        
+        conditions.push(`u.status = TRUE`); // Sempre filtra por usuários ativos
+
+        if (conditions.length > 0) {
+            sql += ` WHERE ` + conditions.join(' AND ');
+        }
+
+        sql += ` ORDER BY u.nome_completo;`; 
+
+        const [rows] = await pool.query(sql, params);
+        
         const relatorio = {};
         rows.forEach(row => {
+            // Garante que todos os usuários ativos sejam incluídos, mesmo que não tenham registros de presença no período
             if (!relatorio[row.id]) {
                 relatorio[row.id] = {
                     nome_completo: row.nome_completo,
@@ -61,6 +82,7 @@ exports.getRelatorioSemanal = async (req, res) => {
                     dias_falta_com_desconto: 0,
                 };
             }
+            // Só adiciona contagens se houver um registro de presença para o dia
             if (row.status === 'Presente') {
                 relatorio[row.id].dias_presente++;
             } else if (row.status === 'Ausente' && row.gera_desconto) {
@@ -82,12 +104,34 @@ exports.getRelatorioSemanal = async (req, res) => {
 // Relatório de Previsão de Pagamento
 exports.getPrevisaoPagamento = async (req, res) => {
     const { dataInicio, dataFim } = req.query;
+    const userPerfil = req.user.perfil_nome;
+
     if (!dataInicio || !dataFim) return res.status(400).json({ msg: 'As datas são obrigatórias.' });
     
     try {
         const diasUteis = await calcularDiasUteis(dataInicio, dataFim);
-        const sql = `SELECT u.nome_completo, (COALESCE(af.valor_almoco, 0) + COALESCE(af.valor_passagem, 0)) as auxilio_diario FROM usuarios u LEFT JOIN auxilios_financeiros af ON u.id = af.vendedor_id WHERE u.perfil_id IN (SELECT id FROM perfis WHERE nome = 'Vendedor') AND u.status = TRUE;`;
-        const [usuarios] = await pool.query(sql);
+        let sql = `
+            SELECT u.id, u.nome_completo, 
+            (COALESCE(af.valor_almoco, 0) + COALESCE(af.valor_passagem, 0)) as auxilio_diario 
+            FROM usuarios u 
+            LEFT JOIN auxilios_financeiros af ON u.id = af.vendedor_id -- CORRIGIDO
+        `;
+        const params = [];
+        const conditions = [];
+
+        // Filtro de perfil dinâmico
+        if (userPerfil !== 'Diretoria') {
+            conditions.push(`u.perfil_id IN (SELECT id FROM perfis WHERE nome IN ('Vendedor', 'Supervisor', 'Gerente', 'BackOffice'))`);
+        }
+        conditions.push(`u.status = TRUE`); // Sempre filtra por usuários ativos
+
+        if (conditions.length > 0) {
+            sql += ` WHERE ` + conditions.join(' AND ');
+        }
+        sql += ` ORDER BY u.nome_completo;`;
+
+        const [usuarios] = await pool.query(sql, params); 
+        
         const dadosFinais = usuarios.map(user => {
             const auxilioDiarioNumerico = parseFloat(user.auxilio_diario);
             return {
@@ -106,10 +150,39 @@ exports.getPrevisaoPagamento = async (req, res) => {
 // Relatório de Descontos
 exports.getRelatorioDescontos = async (req, res) => {
     const { dataInicio, dataFim } = req.query;
+    const userPerfil = req.user.perfil_nome;
+
     if (!dataInicio || !dataFim) return res.status(400).json({ msg: 'As datas são obrigatórias.' });
     try {
-        const sql = `SELECT u.nome_completo, rp.data, m.motivo, (COALESCE(af.valor_almoco, 0) + COALESCE(af.valor_passagem, 0)) as valor_desconto FROM registros_presenca rp JOIN usuarios u ON rp.vendedor_id = u.id JOIN motivos_ausencia m ON rp.motivo_id = m.id LEFT JOIN auxilios_financeiros af ON u.id = af.vendedor_id WHERE rp.data BETWEEN ? AND ? AND rp.status = 'Ausente' AND m.gera_desconto = TRUE ORDER BY u.nome_completo, rp.data;`;
-        const [descontos] = await pool.query(sql, [dataInicio, dataFim]);
+        let sql = `
+            SELECT u.id, u.nome_completo, rp.data, m.motivo, 
+            (COALESCE(af.valor_almoco, 0) + COALESCE(af.valor_passagem, 0)) as valor_desconto 
+            FROM registros_presenca rp 
+            JOIN usuarios u ON rp.vendedor_id = u.id 
+            JOIN motivos_ausencia m ON rp.motivo_id = m.id 
+            LEFT JOIN auxilios_financeiros af ON u.id = af.vendedor_id -- CORRIGIDO
+            WHERE rp.data BETWEEN ? AND ? AND rp.status = 'Ausente' AND m.gera_desconto = TRUE 
+        `;
+        const params = [dataInicio, dataFim];
+        const conditions = [];
+
+        // Filtro de perfil dinâmico
+        if (userPerfil !== 'Diretoria') {
+            conditions.push(`u.perfil_id IN (SELECT id FROM perfis WHERE nome IN ('Vendedor', 'Supervisor', 'Gerente', 'BackOffice'))`);
+        }
+        
+        conditions.push(`u.status = TRUE`); // Garante que apenas usuários ativos sejam considerados
+
+        if (conditions.length > 0) {
+            // Se já existe WHERE na query principal, usamos AND. Caso contrário, esta parte não será adicionada,
+            // pois o WHERE inicial já está dentro do SQL. Precisamos garantir que seja um AND se houver condições.
+            // A query base já tem um WHERE, então as condições adicionais SEMPRE serão AND.
+            sql += ` AND ` + conditions.join(' AND '); 
+        }
+
+        sql += ` ORDER BY u.nome_completo, rp.data;`;
+
+        const [descontos] = await pool.query(sql, params);
         const dadosFinais = descontos.map(item => ({
             ...item,
             valor_desconto: parseFloat(item.valor_desconto)

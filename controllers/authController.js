@@ -21,6 +21,7 @@ exports.login = async (req, res) => {
             JOIN perfis p ON u.perfil_id = p.id
             WHERE u.email = ? AND u.status = TRUE
         `;
+        console.log('Tentando acessar o banco');
         const [users] = await pool.query(sql, [email]);
         
         // --- PISTA 2: O que o banco de dados encontrou? ---
