@@ -5,12 +5,15 @@ require('dotenv').config();
 
 const app = express();
 
-// Define qual endereço de frontend tem permissão para acessar esta API
+// --- CONFIGURAÇÃO DE CORS ROBUSTA (VERSÃO FINAL) ---
 const corsOptions = {
   origin: 'https://cerulean-gumption-f1ae5f.netlify.app',
-  optionsSuccessStatus: 200
+  methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 app.use(cors(corsOptions));
+// ----------------------------------------------------
 
 app.use(express.json()); 
 
@@ -28,5 +31,3 @@ app.use('/api/relatorios', require('./routes/relatorioRoutes'));
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => console.log(`Servidor iniciado na porta ${PORT}`));
-
-// A chave '}' extra que estava aqui foi removida.
